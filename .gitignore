@@ -1,0 +1,9 @@
+# Exclude virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# DotEnv configuration
+.env
