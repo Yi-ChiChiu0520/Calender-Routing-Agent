@@ -22,7 +22,7 @@ This project is an intelligent calendar assistant that uses OpenAI's GPT-4o to:
 
 ## 📦 Installation
 
-1. Clone the repository:
+Clone the repository:
 
 ```bash 
 git clone https://github.com/your-username/Calender-Routing-Agent.git
@@ -31,7 +31,7 @@ cd calendar-routing-agent
 
 ## 🛠 Setup Instructions
 
-### 📦 Create a Virtual Environment and Install Dependencies
+Create a Virtual Environment and Install Dependencies
 ``` bash 
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
