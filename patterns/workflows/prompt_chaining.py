@@ -1,5 +1,5 @@
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -11,6 +11,13 @@ import logging
 import sys
 import smtplib
 
+import os.path
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 logging.basicConfig(
     level = logging.INFO,
@@ -39,6 +46,8 @@ class EventDetails(BaseModel):
     """Second step: Parse specific event details"""
 
     name: str = Field(description="Name of the event")
+    description: str = Field(description="Description of the event")
+    location: str = Field(description="Location of the event")
     date: str = Field(
         description="Date and time of the event. Use ISO 8601 to format this value."
     )
@@ -93,7 +102,11 @@ def parse_event_details(description: str) -> EventDetails:
         messages = [
             {
                 "role": "system",
-                "content": f"{date_context} Extract detailed event information. When dates reference 'next Tuesday' or similar relative dates, use the current date as reference.",
+                "content": (
+                    f"{date_context} Extract detailed event information. "
+                    "When dates reference 'next Tuesday' or similar relative dates, use the current date as reference. "
+                    "Format the date using full ISO 8601 format with time and time zone offset, e.g., '2025-07-24T14:00:00-07:00'."
+                ),
             },
             {
                 "role": "user",
@@ -145,7 +158,67 @@ def send_email(to_emails: list[str], subject: str, message: str):
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
 
-# ----------------------------- Step 3: Generate Confirmation Message -----------------------------
+
+
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
+
+# ----------------------------- Step 4: Add event to Google Calendar -----------------------------
+def add_calendar_event(event_details: EventDetails, emails: list[str]):
+    logger.info("Adding event to Google Calendar")
+
+    creds = None
+
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json")
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            CREDENTIALS_PATH = os.path.join(BASE_DIR, "credentials.json")
+
+            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open("token.json", "w") as token:
+            token.write(creds.to_json())
+
+    try:
+        service = build("calendar", "v3", credentials=creds)
+
+        start_time = event_details.date
+        duration = event_details.duration_minutes
+
+        start_dt = datetime.fromisoformat(start_time)
+        end_dt = start_dt + timedelta(minutes=duration)
+
+        event = {
+            "summary": event_details.name,
+            "location": event_details.location,
+            "description": event_details.description,
+            "colorId": 5,
+            "start": {
+                "dateTime": start_dt.isoformat(),
+                "timeZone": "America/Los_Angeles"
+            },
+            "end": {
+                "dateTime": end_dt.isoformat(),
+                "timeZone": "America/Los_Angeles"
+            },
+            "attendees": [{"email": email} for email in emails],
+            "reminders": {
+              "useDefault": True,
+            },
+        }
+
+        event = service.events().insert(calendarId="primary", body=event).execute()
+
+        print(f"Event created {event.get('htmlLink')}")
+
+    except HttpError as error:
+        print("An error occurred:", error)
+
+# ----------------------------- Step ith: Generate Confirmation Message -----------------------------
 def generate_confirmation(event_details: EventDetails) -> EventConfirmation:
     logger.info("Generating confirmation message")
 
@@ -186,6 +259,7 @@ def process_calendar_request(user_input: str) -> Optional[EventConfirmation]:
 
     participants_emails = email_invitation(event_details.participants)
 
+
     confirmation = generate_confirmation(event_details)
     print(f"{confirmation.confirmation_message} \n")
 
@@ -201,7 +275,8 @@ def process_calendar_request(user_input: str) -> Optional[EventConfirmation]:
         )
 
     logger.info("Calendar request processing completed successfully")
-    return confirmation
+
+    add_calendar_event(event_details, participants_emails)
 
 # ----------------------------- Testing -----------------------------
 # Valid calendar input
