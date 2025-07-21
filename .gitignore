@@ -7,3 +7,6 @@ __pycache__/
 
 # DotEnv configuration
 .env
+
+# Google Calendar API Credentials
+credentials.json
